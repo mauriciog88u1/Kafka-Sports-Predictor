@@ -1,23 +1,23 @@
-from typing import Optional, List
-from fastapi import FastAPI, requests
+import hashlib
+import json
+import os
+import requests
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from confluent_kafka import Producer
-import os
-import json
-import uuid
 
 app = FastAPI()
 
 # Allow your frontend to talk to this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You might want to restrict this in production
+    allow_origins=["*"],  # Consider restricting this in production
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Kafka producer config
+# Kafka producer configuration
 producer_config = {
     "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP"),
     "security.protocol": "SASL_SSL",
@@ -27,7 +27,7 @@ producer_config = {
 }
 producer = Producer(producer_config)
 
-# Temporary storage for match predictions
+# Temporary in-memory store for match predictions
 predictions = {}
 
 # Match schema
@@ -36,25 +36,23 @@ class Match(BaseModel):
     strEvent: str
     dateEvent: str
     strTime: str
-    strVenue: Optional[str] = None
+    strVenue: str = None
     strHomeTeam: str
     strAwayTeam: str
-    idHomeTeam: Optional[str] = None
-    idAwayTeam: Optional[str] = None
-    intRound: Optional[str] = None
-    strLeague: Optional[str] = None
-    strSeason: Optional[str] = None
-    playerStats: Optional[List[dict]] = []
-    matchHistory: Optional[List[dict]] = []
-    eventStats: Optional[dict] = None
-    eventLineup: Optional[dict] = None
-    leagueTable: Optional[List[dict]] = []
-
+    idHomeTeam: str = None
+    idAwayTeam: str = None
+    intRound: str = None
+    strLeague: str = None
+    strSeason: str = None
+    playerStats: list = []
+    matchHistory: list = []
+    eventStats: dict = None
+    eventLineup: dict = None
+    leagueTable: list = []
 
 @app.get("/healthz")
 def health_check():
     return {"status": "ok"}
-
 
 @app.get("/matches")
 def get_matches(team_id: str = "133602"):
@@ -105,33 +103,27 @@ def get_matches(team_id: str = "133602"):
 
     return {"matches": matches}
 
-
 @app.post("/predict")
 def predict_outcome(match: Match):
-    # Generate a unique ID for each match to correlate with prediction
-    match_id = str(uuid.uuid4())
-
     match_data = match.dict()
-    match_data["match_id"] = match_id
+    # Compute a deterministic hash from idEvent using MD5
+    match_hash = hashlib.md5(match_data["idEvent"].encode("utf-8")).hexdigest()
+    match_data["match_id"] = match_hash
 
-    # Set initial status to 'waiting for prediction...'
-    predictions[match_id] = "waiting for prediction..."
-
-    # Send match data to Kafka
-    producer.produce("match_updates", json.dumps(match_data).encode("utf-8"))
-    producer.flush()
-
-    return {"status": "sent", "match": match_data, "correlation_id": match_id}
-
+    predictions[match_hash] = "waiting for prediction..."
+    try:
+        producer.produce("match_updates", json.dumps(match_data).encode("utf-8"))
+        producer.flush()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error producing message to Kafka")
+    return {"status": "sent", "match": match_data, "correlation_id": match_hash}
 
 @app.get("/prediction/{match_id}")
 def get_prediction(match_id: str):
-    # If prediction is not ready, show waiting message
     prediction = predictions.get(match_id, "waiting for prediction...")
     return {"match_id": match_id, "prediction": prediction}
 
 @app.put("/prediction/{match_id}")
 def set_prediction(match_id: str, prediction: dict):
-    # Update the prediction status for this match ID
-    predictions[match_id] = prediction["prediction"]
-    return {"status": "prediction updated", "match_id": match_id, "prediction": prediction["prediction"]}
+    predictions[match_id] = prediction.get("prediction", "no prediction provided")
+    return {"status": "prediction updated", "match_id": match_id, "prediction": predictions[match_id]}

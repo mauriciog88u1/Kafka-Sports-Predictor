@@ -38,6 +38,7 @@ This is a demo application to predict the winner of football games. It consists 
    - Sends the prediction result back to FastAPI via `PUT /prediction/{match_id}`  
 5. FastAPI updates its in-memory map with the final prediction  
 6. UI clicks **Get Prediction**, frontend calls `GET /prediction/{match_id}` and displays the prediction  
+![UML Diagram](![uml_kafka](https://github.com/user-attachments/assets/df1f694e-0afe-4a1c-8569-6b0f0513a48b))
 
 ## What I Would Do Differently Next Time
 - Use a Random Forest algorithm with proper train/test splits for real machine learning  

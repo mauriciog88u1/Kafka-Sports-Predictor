@@ -1,76 +1,102 @@
-from confluent_kafka import Consumer, Producer
+import logging
 import json
-import requests
 import os
-from predictor import predict  # Assuming this function is defined elsewhere and works correctly
+import requests
+from confluent_kafka import Consumer, Producer
+from predictor import predict  # Ensure your predictor function is available
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
 
 def start_kafka_loop(on_prediction=None):
     # Kafka Consumer configuration
     consumer_config = {
         'bootstrap.servers': os.getenv("KAFKA_BOOTSTRAP"),
         'security.protocol': 'SASL_SSL',
-        'sasl.mechanism': 'PLAIN',
+        'sasl.mechanisms': 'PLAIN',
         'sasl.username': os.getenv("KAFKA_USERNAME"),
         'sasl.password': os.getenv("KAFKA_PASSWORD"),
         'group.id': 'ml-consumer-group',
         'auto.offset.reset': 'latest'
     }
 
-    # Kafka Consumer instance
     consumer = Consumer(consumer_config)
-    consumer.subscribe(["match_updates"])  # Listening to "match_updates" topic
+    consumer.subscribe(["match_updates"])
+    logger.info("Kafka consumer started and subscribed to topic: match_updates")
 
-    print("Kafka consumer started and listening on topic: match_updates")
-
-    # Kafka Producer instance for sending predictions back (if needed)
-    producer = Producer({
+    # Kafka Producer configuration (if needed for additional use)
+    producer_config = {
         "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP"),
         "security.protocol": "SASL_SSL",
         "sasl.mechanisms": "PLAIN",
         "sasl.username": os.getenv("KAFKA_USERNAME"),
         "sasl.password": os.getenv("KAFKA_PASSWORD"),
-    })
+    }
+    producer = Producer(producer_config)
 
     while True:
-        # Poll the Kafka topic for messages (1-second timeout)
-        msg = consumer.poll(1.0)
-
-        if msg is None:
-            continue  # No message received, continue to poll
-        if msg.error():
-            print(f"⚠️ Kafka error: {msg.error()}")
-            continue  # Handle any Kafka errors
-
         try:
-            # Deserialize the incoming message (match data)
-            data = json.loads(msg.value().decode("utf-8"))
-            match_id = data["idEvent"]  # Using the event ID (assuming it's the match ID)
-            print("📦 Match received:", data)
+            msg = consumer.poll(1.0)  # Poll for messages with 1-second timeout
+            if msg is None:
+                continue  # No message received, continue polling
+            if msg.error():
+                logger.error(f"Kafka error: {msg.error()}")
+                continue
 
-            # Make the prediction based on the match data
-            prediction = predict(data)
+            # Deserialize the incoming message
+            try:
+                data = json.loads(msg.value().decode("utf-8"))
+            except Exception as e:
+                logger.error(f"Error decoding message: {e}")
+                continue
 
-            # Prepare the result to send back (send prediction to producer or UI)
+            # Use the deterministic match_id provided in the message
+            match_id = data.get("match_id")
+            if not match_id:
+                logger.error("No match_id found in the message payload.")
+                continue
+
+            logger.info(f"Received match data: {data}")
+
+            # Run prediction logic
+            try:
+                prediction = predict(data)
+            except Exception as e:
+                logger.error(f"Error running prediction: {e}")
+                prediction = "Error in prediction"
+
+            # Prepare result to update via backend API
             result = {
                 "match_id": match_id,
                 "prediction": prediction
             }
 
-            # Define the URL where the prediction should be sent (this would be the API that handles predictions)
+            # Send the prediction update to your backend via PUT
             prediction_url = f"https://bet365-ml-api-806378004153.us-central1.run.app/prediction/{match_id}"
+            try:
+                response = requests.put(prediction_url, json=result)
+            except Exception as e:
+                logger.error(f"Error sending PUT request: {e}")
+                continue
 
-            # Send the prediction result to the producer via PUT request (or POST if needed)
-            response = requests.put(prediction_url, json=result)
-
-            # Log the response from the PUT request
             if response.status_code == 200:
-                print("📈 Prediction sent successfully:", response.status_code, response.text)
+                logger.info(f"Prediction updated successfully: {response.status_code} {response.text}")
             else:
-                print(f"❌ Failed to send prediction. Status: {response.status_code}, Response: {response.text}")
+                logger.error(f"Failed to update prediction. Status: {response.status_code}, Response: {response.text}")
 
-            # If the callback `on_prediction` was passed, invoke it
+            # If an additional callback is provided, invoke it with the result
             if on_prediction:
                 on_prediction(result)
 
         except Exception as e:
-            print(f"❌ Error during prediction: {e}")
+            # Logs any unexpected error along with stack trace
+            logger.exception(f"Unexpected error in consumer loop: {e}")
+
+if __name__ == "__main__":
+    # Start the consumer loop. You can pass a callback to act on predictions if desired.
+    start_kafka_loop()

@@ -1,3 +1,4 @@
+from typing import Optional, List
 from fastapi import FastAPI, requests
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -53,6 +54,7 @@ class Match(BaseModel):
 @app.get("/healthz")
 def health_check():
     return {"status": "ok"}
+
 
 @app.get("/matches")
 def get_matches(team_id: str = "133602"):
@@ -115,10 +117,12 @@ def predict_outcome(match: Match):
     # Set initial status to 'waiting for prediction...'
     predictions[match_id] = "waiting for prediction..."
 
+    # Send match data to Kafka
     producer.produce("match_updates", json.dumps(match_data).encode("utf-8"))
     producer.flush()
 
     return {"status": "sent", "match": match_data, "correlation_id": match_id}
+
 
 @app.get("/prediction/{match_id}")
 def get_prediction(match_id: str):
@@ -126,7 +130,7 @@ def get_prediction(match_id: str):
     prediction = predictions.get(match_id, "waiting for prediction...")
     return {"match_id": match_id, "prediction": prediction}
 
-@app.post("/prediction/{match_id}")
+@app.put("/prediction/{match_id}")
 def set_prediction(match_id: str, prediction: dict):
     # Update the prediction status for this match ID
     predictions[match_id] = prediction["prediction"]

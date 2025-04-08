@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
-from consumer import start_kafka_loop
+from consumer import start_kafka_loop  # Assuming this is the correct import path
 
 latest_prediction = {"status": "waiting for predictions..."}
 
@@ -22,5 +22,6 @@ def run_http_server():
 
 if __name__ == "__main__":
     print("🚀 server.py is running...")
+    # Start Kafka loop in a separate thread and pass `update_prediction` as callback
     threading.Thread(target=lambda: start_kafka_loop(update_prediction), daemon=True).start()
     run_http_server()

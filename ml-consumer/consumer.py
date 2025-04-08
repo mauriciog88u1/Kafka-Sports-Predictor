@@ -82,5 +82,4 @@ def start_kafka_loop(on_prediction=None):
         except Exception as e:
             print("Unexpected error in consumer loop:", e)
 
-if __name__ == "__main__":
-    start_kafka_loop()
+

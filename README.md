@@ -41,9 +41,11 @@ This is a demo application to predict the winner of football games. It consists 
 
 ## What I Would Do Differently Next Time
 - Use a Random Forest algorithm with proper train/test splits for real machine learning  
-- Integrate a database (e.g., PostgreSQL ) for persistent storage  
+- Integrate a database (e.g., PostgreSQL or Firestore) for persistent storage  
 - Implement real-time event updates via WebSockets or Server-Sent Events instead of polling  
-- Add authentication headers for secure API endpoints  
+- Add authentication headers (e.g., JWT) for secure API endpoints  
 - Set up GitHub–GCP integrations for CI/CD and automated deployments  
 - Refactor code to follow clean code principles and improve maintainability  
 - Increase test coverage with unit, integration, and end-to-end tests  
+- Explore Kafka Streams for more advanced, stateful stream processing  
+- Add JSON schema validation for all API request and response payloads  

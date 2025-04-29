@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Match Update Schema",
+  "description": "Schema for match updates received from frontend",
+  "type": "object",
+  "required": [
+    "idEvent",
+    "strEvent",
+    "strLeague",
+    "strHomeTeam",
+    "strAwayTeam",
+    "dateEvent",
+    "strTime",
+    "strStatus"
+  ],
+  "properties": {
+    "idEvent": {
+      "type": "string",
+      "description": "Unique identifier for the match"
+    },
+    "strEvent": {
+      "type": "string",
+      "description": "Name of the match"
+    },
+    "strLeague": {
+      "type": "string",
+      "description": "Name of the league"
+    },
+    "strHomeTeam": {
+      "type": "string",
+      "description": "Name of the home team"
+    },
+    "strAwayTeam": {
+      "type": "string",
+      "description": "Name of the away team"
+    },
+    "dateEvent": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of the match in YYYY-MM-DD format"
+    },
+    "strTime": {
+      "type": "string",
+      "format": "time",
+      "description": "Time of the match in HH:MM:SS format"
+    },
+    "intHomeScore": {
+      "type": ["integer", "null"],
+      "description": "Current home team score, null if not started"
+    },
+    "intAwayScore": {
+      "type": ["integer", "null"],
+      "description": "Current away team score, null if not started"
+    },
+    "strStatus": {
+      "type": "string",
+      "enum": ["Not Started", "Live", "Finished", "Postponed", "Cancelled"],
+      "description": "Current status of the match"
+    },
+    "odds": {
+      "type": "object",
+      "required": ["home", "draw", "away"],
+      "properties": {
+        "home": {
+          "type": "number",
+          "minimum": 1.0,
+          "description": "Decimal odds for home win"
+        },
+        "draw": {
+          "type": "number",
+          "minimum": 1.0,
+          "description": "Decimal odds for draw"
+        },
+        "away": {
+          "type": "number",
+          "minimum": 1.0,
+          "description": "Decimal odds for away win"
+        }
+      }
+    }
+  }
+} 

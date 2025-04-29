@@ -1,75 +1,194 @@
 """Sports DB API service."""
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 import httpx
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://www.thesportsdb.com/api/v1/json/3"
+BASE_URL = f"https://www.thesportsdb.com/api/v1/json/{settings.SPORTSDB_API_KEY}"
 
 
 async def get_match_data(match_id: str) -> Dict[str, Any]:
-    """Get match data from Sports DB API.
+    """
+    Fetch match data from TheSportsDB API and transform it into a structured format.
     
     Args:
         match_id: The ID of the match to fetch
         
     Returns:
-        Dictionary containing match data
-        
-    Raises:
-        ValueError: If match is not found or API error occurs
+        Dict containing match data and team statistics
     """
-    async with httpx.AsyncClient() as client:
-        try:
-            # Get event details
-            event_response = await client.get(
-                f"{BASE_URL}/lookupevent.php",
-                params={"id": match_id}
-            )
-            event_response.raise_for_status()
-            event_data = event_response.json()
+    try:
+        # Get match details
+        match_url = f"{BASE_URL}/lookupevent.php?id={match_id}"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(match_url)
+            response.raise_for_status()
+            match_data = response.json()
             
-            if not event_data.get("events"):
-                raise ValueError(f"Match {match_id} not found")
+            if not match_data.get("events"):
+                raise ValueError(f"No match found with ID {match_id}")
+                
+            event = match_data["events"][0]
             
-            event = event_data["events"][0]
+            # Get team details for both home and away teams
+            home_team_url = f"{BASE_URL}/lookupteam.php?id={event['idHomeTeam']}"
+            away_team_url = f"{BASE_URL}/lookupteam.php?id={event['idAwayTeam']}"
             
-            # Get event statistics if available
-            stats_response = await client.get(
-                f"{BASE_URL}/lookupeventstats.php",
-                params={"id": match_id}
-            )
-            stats_data = stats_response.json() if stats_response.status_code == 200 else {}
+            home_team_response = await client.get(home_team_url)
+            away_team_response = await client.get(away_team_url)
             
-            # Transform data into our schema
+            home_team_response.raise_for_status()
+            away_team_response.raise_for_status()
+            
+            home_team_data = home_team_response.json()
+            away_team_data = away_team_response.json()
+            
+            # Get last 5 matches for both teams
+            home_team_last_matches_url = f"{BASE_URL}/eventslast.php?id={event['idHomeTeam']}"
+            away_team_last_matches_url = f"{BASE_URL}/eventslast.php?id={event['idAwayTeam']}"
+            
+            home_team_last_matches_response = await client.get(home_team_last_matches_url)
+            away_team_last_matches_response = await client.get(away_team_last_matches_url)
+            
+            home_team_last_matches_response.raise_for_status()
+            away_team_last_matches_response.raise_for_status()
+            
+            home_team_last_matches = home_team_last_matches_response.json()
+            away_team_last_matches = away_team_last_matches_response.json()
+            
+            # Calculate form for both teams
+            home_team_form = calculate_team_form(home_team_last_matches.get("results", []))
+            away_team_form = calculate_team_form(away_team_last_matches.get("results", []))
+            
+            # Transform the data into our format
             transformed_data = {
-                "idEvent": str(event["idEvent"]),
+                "idEvent": event["idEvent"],
                 "strEvent": event["strEvent"],
                 "strLeague": event["strLeague"],
+                "idLeague": event.get("idLeague"),
+                "strSeason": event.get("strSeason"),
+                "idHomeTeam": event["idHomeTeam"],
                 "strHomeTeam": event["strHomeTeam"],
+                "idAwayTeam": event["idAwayTeam"],
                 "strAwayTeam": event["strAwayTeam"],
                 "dateEvent": event["dateEvent"],
                 "strTime": event["strTime"],
-                "intHomeScore": int(event["intHomeScore"]) if event.get("intHomeScore") else None,
-                "intAwayScore": int(event["intAwayScore"]) if event.get("intAwayScore") else None,
-                "strStatus": event.get("strStatus", "Not Started"),
+                "strTimestamp": f"{event['dateEvent']}T{event['strTime']}",
+                "intHomeScore": int(event["intHomeScore"]) if event.get("intHomeScore") not in (None, "") else None,
+                "intAwayScore": int(event["intAwayScore"]) if event.get("intAwayScore") not in (None, "") else None,
+                "strStatus": event["strStatus"],
                 "team_stats": {
-                    "home": await get_team_stats(event["idHomeTeam"]),
-                    "away": await get_team_stats(event["idAwayTeam"])
+                    "home": {
+                        "form": home_team_form,
+                        "xg_for": 1.8,  # Placeholder for expected goals
+                        "xg_against": 1.2,  # Placeholder for expected goals against
+                        "avg_goals_scored": 1.6,  # Placeholder for average goals scored
+                        "avg_goals_conceded": 0.8,  # Placeholder for average goals conceded
+                        "win_probability": 0.6  # Placeholder for win probability
+                    },
+                    "away": {
+                        "form": away_team_form,
+                        "xg_for": 1.5,  # Placeholder for expected goals
+                        "xg_against": 1.4,  # Placeholder for expected goals against
+                        "avg_goals_scored": 1.4,  # Placeholder for average goals scored
+                        "avg_goals_conceded": 1.0,  # Placeholder for average goals conceded
+                        "win_probability": 0.4  # Placeholder for win probability
+                    }
+                },
+                "odds": {
+                    "home_win": 2.0,  # Placeholder for home win odds
+                    "draw": 3.5,  # Placeholder for draw odds
+                    "away_win": 4.0,  # Placeholder for away win odds
+                    "over_2_5": 1.8,  # Placeholder for over 2.5 goals odds
+                    "under_2_5": 2.0,  # Placeholder for under 2.5 goals odds
+                    "btts_yes": 1.9,  # Placeholder for both teams to score odds
+                    "btts_no": 1.9  # Placeholder for both teams not to score odds
                 }
             }
             
-            # Calculate basic odds based on team stats (since we don't have real odds)
-            transformed_data["odds"] = calculate_basic_odds(transformed_data["team_stats"])
-            
-            logger.info(f"Successfully fetched and transformed data for match {match_id}")
             return transformed_data
             
-        except httpx.HTTPError as e:
-            logger.error(f"Error fetching match {match_id}: {str(e)}")
-            raise ValueError(f"Failed to fetch match data: {str(e)}")
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error fetching match data: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching match data: {str(e)}")
+        raise
+
+
+def calculate_team_form(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Calculate team form based on last 5 matches.
+    
+    Args:
+        matches: List of match data
+        
+    Returns:
+        Dict containing form statistics
+    """
+    if not matches:
+        return {
+            "last_5": [],
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "goals_for": 0,
+            "goals_against": 0,
+            "form_rating": 0.0
+        }
+    
+    form = {
+        "last_5": [],
+        "wins": 0,
+        "draws": 0,
+        "losses": 0,
+        "goals_for": 0,
+        "goals_against": 0
+    }
+    
+    for match in matches[:5]:
+        home_score = int(match.get("intHomeScore", 0) or 0)
+        away_score = int(match.get("intAwayScore", 0) or 0)
+        
+        if match.get("strHomeTeam") == match.get("strTeam"):
+            # Team is home
+            form["goals_for"] += home_score
+            form["goals_against"] += away_score
+            
+            if home_score > away_score:
+                form["wins"] += 1
+                form["last_5"].append("W")
+            elif home_score == away_score:
+                form["draws"] += 1
+                form["last_5"].append("D")
+            else:
+                form["losses"] += 1
+                form["last_5"].append("L")
+        else:
+            # Team is away
+            form["goals_for"] += away_score
+            form["goals_against"] += home_score
+            
+            if away_score > home_score:
+                form["wins"] += 1
+                form["last_5"].append("W")
+            elif away_score == home_score:
+                form["draws"] += 1
+                form["last_5"].append("D")
+            else:
+                form["losses"] += 1
+                form["last_5"].append("L")
+    
+    # Calculate form rating (points per game)
+    total_matches = len(form["last_5"])
+    if total_matches > 0:
+        form["form_rating"] = (form["wins"] * 3 + form["draws"]) / total_matches
+    else:
+        form["form_rating"] = 0.0
+    
+    return form
 
 
 async def get_team_stats(team_id: str) -> Dict[str, Any]:
@@ -102,13 +221,13 @@ async def get_team_stats(team_id: str) -> Dict[str, Any]:
             shots_total = 0
             
             for event in events:
-                is_home = event["strHomeTeam"] == event["strTeam"]
+                is_home = event.get("idHomeTeam") == team_id
                 if is_home:
-                    goals_scored += int(event["intHomeScore"] or 0)
-                    goals_conceded += int(event["intAwayScore"] or 0)
+                    goals_scored += int(event.get("intHomeScore", 0) or 0)
+                    goals_conceded += int(event.get("intAwayScore", 0) or 0)
                 else:
-                    goals_scored += int(event["intAwayScore"] or 0)
-                    goals_conceded += int(event["intHomeScore"] or 0)
+                    goals_scored += int(event.get("intAwayScore", 0) or 0)
+                    goals_conceded += int(event.get("intHomeScore", 0) or 0)
                 
                 # Estimate shots based on goals (since we don't have real shot data)
                 shots_total += goals_scored * 3

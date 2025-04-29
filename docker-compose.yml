@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - KAFKA_BOOTSTRAP=pkc-n3603.us-central1.gcp.confluent.cloud:9092
+      - SPORTS_DB_API_KEY=638861
+      - KAFKA_SECURITY_PROTOCOL=SASL_SSL
+      - KAFKA_SASL_MECHANISM=PLAIN
+      - KAFKA_USERNAME=RIVTERCF6O6NO5M5
+      - KAFKA_PASSWORD=26SV6blptYtNsyh2wFzdMRsRadlp/cSZcchcmvsSEXd58jvF4P8pS2vCVouHXrCG
+      - KAFKA_GROUP_ID=bet365-predictor
+      - KAFKA_TOPIC=match_predictions
+      - KAFKA_PRODUCER_ACKS=all
+      - KAFKA_PRODUCER_RETRIES=3
+      - KAFKA_PRODUCER_BATCH_SIZE=16384
+      - KAFKA_PRODUCER_LINGER_MS=1
+      - KAFKA_PRODUCER_BUFFER_MEMORY=33554432
+      - KAFKA_CONSUMER_AUTO_OFFSET_RESET=latest
+      - KAFKA_CONSUMER_ENABLE_AUTO_COMMIT=false
+      - KAFKA_CONSUMER_MAX_POLL_RECORDS=500
+      - KAFKA_CONSUMER_SESSION_TIMEOUT_MS=45000
+      - KAFKA_CONSUMER_HEARTBEAT_INTERVAL_MS=15000
+    networks:
+      - app-network
+    depends_on:
+      - kafka
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - app-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge 

@@ -13,20 +13,76 @@ def validator():
 def valid_match_update():
     """Create a valid match update."""
     return {
-        "idEvent": "12345",
-        "strEvent": "Team A vs Team B",
-        "strLeague": "Premier League",
-        "strHomeTeam": "Team A",
-        "strAwayTeam": "Team B",
-        "dateEvent": "2024-03-20",
-        "strTime": "20:00:00",
-        "intHomeScore": None,
-        "intAwayScore": None,
-        "strStatus": "Not Started",
-        "odds": {
-            "home": 2.5,
-            "draw": 3.2,
-            "away": 2.8
+        "match": {
+            "id": "12345",
+            "name": "Team A vs Team B",
+            "league": "Premier League",
+            "league_badge": "https://example.com/badge.png",
+            "home_team": "Team A",
+            "away_team": "Team B",
+            "date": "2024-03-20",
+            "time": "20:00:00",
+            "status": "Not Started",
+            "home_score": None,
+            "away_score": None,
+            "round": 28,
+            "spectators": 50000,
+            "venue": "Stadium A",
+            "country": "England"
+        },
+        "home_team": {
+            "id": "133604",
+            "name": "Team A",
+            "badge": "https://example.com/team_a.png",
+            "form": {
+                "last_5": ["W", "D", "W", "L", "W"],
+                "wins": 3,
+                "draws": 1,
+                "losses": 1,
+                "goals_for": 8,
+                "goals_against": 4,
+                "form_rating": 2.0
+            },
+            "last_matches": [],
+            "details": {
+                "founded": 1892,
+                "stadium": "Stadium A",
+                "capacity": 60000,
+                "location": "City A",
+                "website": "https://example.com",
+                "colors": {
+                    "primary": "#FF0000",
+                    "secondary": "#FFFFFF",
+                    "tertiary": "#000000"
+                }
+            }
+        },
+        "away_team": {
+            "id": "133605",
+            "name": "Team B",
+            "badge": "https://example.com/team_b.png",
+            "form": {
+                "last_5": ["L", "W", "D", "W", "L"],
+                "wins": 2,
+                "draws": 1,
+                "losses": 2,
+                "goals_for": 6,
+                "goals_against": 7,
+                "form_rating": 1.4
+            },
+            "last_matches": [],
+            "details": {
+                "founded": 1893,
+                "stadium": "Stadium B",
+                "capacity": 55000,
+                "location": "City B",
+                "website": "https://example.com",
+                "colors": {
+                    "primary": "#0000FF",
+                    "secondary": "#FFFFFF",
+                    "tertiary": "#000000"
+                }
+            }
         }
     }
 

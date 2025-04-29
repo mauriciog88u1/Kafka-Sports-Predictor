@@ -7,11 +7,18 @@
     "idEvent",
     "strEvent",
     "strLeague",
+    "idLeague",
+    "strSeason",
+    "idHomeTeam",
     "strHomeTeam",
+    "idAwayTeam",
     "strAwayTeam",
     "dateEvent",
     "strTime",
-    "strStatus"
+    "strTimestamp",
+    "strStatus",
+    "team_stats",
+    "odds"
   ],
   "properties": {
     "idEvent": {
@@ -26,9 +33,25 @@
       "type": "string",
       "description": "Name of the league"
     },
+    "idLeague": {
+      "type": "string",
+      "description": "Unique identifier for the league"
+    },
+    "strSeason": {
+      "type": "string",
+      "description": "Season identifier"
+    },
+    "idHomeTeam": {
+      "type": "string",
+      "description": "Unique identifier for the home team"
+    },
     "strHomeTeam": {
       "type": "string",
       "description": "Name of the home team"
+    },
+    "idAwayTeam": {
+      "type": "string",
+      "description": "Unique identifier for the away team"
     },
     "strAwayTeam": {
       "type": "string",
@@ -44,6 +67,11 @@
       "format": "time",
       "description": "Time of the match in HH:MM:SS format"
     },
+    "strTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Combined date and time of the match"
+    },
     "intHomeScore": {
       "type": ["integer", "null"],
       "description": "Current home team score, null if not started"
@@ -57,24 +85,193 @@
       "enum": ["Not Started", "Live", "Finished", "Postponed", "Cancelled"],
       "description": "Current status of the match"
     },
-    "odds": {
+    "team_stats": {
       "type": "object",
-      "required": ["home", "draw", "away"],
+      "required": ["home", "away"],
       "properties": {
         "home": {
+          "type": "object",
+          "required": ["form", "xg_for", "xg_against", "avg_goals_scored", "avg_goals_conceded", "win_probability"],
+          "properties": {
+            "form": {
+              "type": "object",
+              "required": ["wins", "draws", "losses", "goals_scored", "goals_conceded", "clean_sheets", "failed_to_score", "form_score"],
+              "properties": {
+                "wins": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Number of wins in last 5 matches"
+                },
+                "draws": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Number of draws in last 5 matches"
+                },
+                "losses": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Number of losses in last 5 matches"
+                },
+                "goals_scored": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Goals scored in last 5 matches"
+                },
+                "goals_conceded": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Goals conceded in last 5 matches"
+                },
+                "clean_sheets": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Clean sheets in last 5 matches"
+                },
+                "failed_to_score": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Failed to score in last 5 matches"
+                },
+                "form_score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Form score (0-100)"
+                }
+              }
+            },
+            "xg_for": {
+              "type": "number",
+              "description": "Expected goals for"
+            },
+            "xg_against": {
+              "type": "number",
+              "description": "Expected goals against"
+            },
+            "avg_goals_scored": {
+              "type": "number",
+              "description": "Average goals scored per match"
+            },
+            "avg_goals_conceded": {
+              "type": "number",
+              "description": "Average goals conceded per match"
+            },
+            "win_probability": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Probability of winning"
+            }
+          }
+        },
+        "away": {
+          "type": "object",
+          "required": ["form", "xg_for", "xg_against", "avg_goals_scored", "avg_goals_conceded", "win_probability"],
+          "properties": {
+            "form": {
+              "type": "object",
+              "required": ["wins", "draws", "losses", "goals_scored", "goals_conceded", "clean_sheets", "failed_to_score", "form_score"],
+              "properties": {
+                "wins": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Number of wins in last 5 matches"
+                },
+                "draws": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Number of draws in last 5 matches"
+                },
+                "losses": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Number of losses in last 5 matches"
+                },
+                "goals_scored": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Goals scored in last 5 matches"
+                },
+                "goals_conceded": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Goals conceded in last 5 matches"
+                },
+                "clean_sheets": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Clean sheets in last 5 matches"
+                },
+                "failed_to_score": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Failed to score in last 5 matches"
+                },
+                "form_score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Form score (0-100)"
+                }
+              }
+            },
+            "xg_for": {
+              "type": "number",
+              "description": "Expected goals for"
+            },
+            "xg_against": {
+              "type": "number",
+              "description": "Expected goals against"
+            },
+            "avg_goals_scored": {
+              "type": "number",
+              "description": "Average goals scored per match"
+            },
+            "avg_goals_conceded": {
+              "type": "number",
+              "description": "Average goals conceded per match"
+            },
+            "win_probability": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Probability of winning"
+            }
+          }
+        }
+      }
+    },
+    "odds": {
+      "type": "object",
+      "required": ["home_win", "draw", "away_win", "over_2_5", "under_2_5", "btts_yes", "btts_no"],
+      "properties": {
+        "home_win": {
           "type": "number",
-          "minimum": 1.0,
-          "description": "Decimal odds for home win"
+          "description": "Odds for home team win"
         },
         "draw": {
           "type": "number",
-          "minimum": 1.0,
-          "description": "Decimal odds for draw"
+          "description": "Odds for draw"
         },
-        "away": {
+        "away_win": {
           "type": "number",
-          "minimum": 1.0,
-          "description": "Decimal odds for away win"
+          "description": "Odds for away team win"
+        },
+        "over_2_5": {
+          "type": "number",
+          "description": "Odds for over 2.5 goals"
+        },
+        "under_2_5": {
+          "type": "number",
+          "description": "Odds for under 2.5 goals"
+        },
+        "btts_yes": {
+          "type": "number",
+          "description": "Odds for both teams to score"
+        },
+        "btts_no": {
+          "type": "number",
+          "description": "Odds for both teams not to score"
         }
       }
     }

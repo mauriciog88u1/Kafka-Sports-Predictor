@@ -5,7 +5,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from src.api.services import sports_db, kafka, predictions
 from src.utils.validation import SchemaValidator
+from src.config import settings
+from src.utils.logging import setup_logging
+import json
 
+# Setup logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Sports Prediction API")
@@ -19,9 +24,38 @@ class MatchBatchRequest(BaseModel):
 
 class MatchBatchResponse(BaseModel):
     """Response model for batch match processing."""
-    status: str
-    processed: int
-    errors: List[Dict[str, Any]] = []
+    status: str = Field(..., description="Status of the processing operation")
+    processed: int = Field(..., description="Number of matches successfully processed")
+    errors: List[Dict[str, str]] = Field(default_factory=list, description="List of errors encountered")
+    results: List[Dict[str, Any]] = Field(default_factory=list, description="List of processed match data")
+
+
+async def handle_prediction_message(message: Dict[str, Any]) -> None:
+    """Handle incoming prediction messages from Kafka.
+    
+    Args:
+        message: The prediction message to handle
+    """
+    try:
+        logger.info(f"Received prediction message: {json.dumps(message, indent=2)}")
+        # TODO: Process the prediction message (e.g., store in database, send notifications)
+    except Exception as e:
+        logger.error(f"Error handling prediction message: {str(e)}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize resources on startup."""
+    # Initialize Kafka consumer
+    await kafka.get_consumer(handler=handle_prediction_message)
+    logger.info("Application startup completed")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources on shutdown."""
+    await kafka.cleanup()
+    logger.info("Application shutdown completed")
 
 
 @app.post("/api/v1/matches/batch", response_model=MatchBatchResponse)
@@ -46,6 +80,7 @@ async def process_match_batch(request: MatchBatchRequest) -> MatchBatchResponse:
     
     processed = 0
     errors = []
+    results = []
     
     for match_id in request.match_ids:
         try:
@@ -57,44 +92,33 @@ async def process_match_batch(request: MatchBatchRequest) -> MatchBatchResponse:
                 validator.validate_match_update(match_data)
             except Exception as e:
                 logger.error(f"Validation error for match {match_id}: {str(e)}")
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Validation error: {str(e)}"
-                )
+                errors.append({
+                    "match_id": match_id,
+                    "error": str(e)
+                })
+                continue
             
             # Produce to Kafka
             await kafka.produce_message(
-                topic="match_updates",
+                topic=settings.KAFKA_TOPIC,
                 value=match_data
             )
             
             processed += 1
+            results.append(match_data)
             
-        except ValueError as e:
-            errors.append({
-                "match_id": match_id,
-                "error": str(e)
-            })
         except Exception as e:
             logger.error(f"Error processing match {match_id}: {str(e)}")
             errors.append({
                 "match_id": match_id,
-                "error": "Internal server error"
+                "error": str(e)
             })
-    
-    if processed == 0 and errors:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": "All matches failed to process",
-                "details": errors
-            }
-        )
     
     return MatchBatchResponse(
         status="success",
         processed=processed,
-        errors=errors
+        errors=errors,
+        results=results
     )
 
 
@@ -126,10 +150,4 @@ async def get_prediction(match_id: str) -> Dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail="Internal server error"
-        )
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup resources on shutdown."""
-    await kafka.cleanup() 
+        ) 

@@ -100,4 +100,20 @@ class SchemaValidator:
                     'validator_value': error.validator_value
                 })
         
-        return errors 
+        return errors
+
+    def validate_match_data(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Validate match data against the match update schema.
+        
+        This is an alias for validate_match_update for backward compatibility.
+        
+        Args:
+            data: The match data to validate
+            
+        Returns:
+            The validated data if successful
+            
+        Raises:
+            SchemaValidationError: If validation fails
+        """
+        return self.validate_match_update(data) 

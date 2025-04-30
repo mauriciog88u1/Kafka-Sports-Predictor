@@ -3,7 +3,7 @@ import logging
 from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from src.api.services import sports_db, kafka, predictions
+from src.api.services import sports_db, kafka
 from src.utils.validation import SchemaValidator
 from src.config import settings
 from src.utils.logging import setup_logging
@@ -37,10 +37,35 @@ async def handle_prediction_message(message: Dict[str, Any]) -> None:
         message: The prediction message to handle
     """
     try:
-        logger.info(f"Received prediction message: {json.dumps(message, indent=2)}")
-        # TODO: Process the prediction message (e.g., store in database, send notifications)
+        logger.info("=== Received Kafka Message ===")
+        logger.info(f"Message type: {type(message)}")
+        logger.info(f"Message content: {json.dumps(message, indent=2)}")
+        
+        # Extract key match data for logging
+        match_id = message.get('idEvent')
+        home_team = message.get('strHomeTeam')
+        away_team = message.get('strAwayTeam')
+        logger.info(f"Processing match: {home_team} vs {away_team} (ID: {match_id})")
+        
+        # Log team stats
+        team_stats = message.get('team_stats', {})
+        if team_stats:
+            home_stats = team_stats.get('home', {})
+            away_stats = team_stats.get('away', {})
+            logger.info(f"Home team form score: {home_stats.get('form', {}).get('form_score')}")
+            logger.info(f"Away team form score: {away_stats.get('form', {}).get('form_score')}")
+        
+        # Log odds
+        odds = message.get('odds', {})
+        if odds:
+            logger.info(f"Match odds - Home: {odds.get('home_win')}, Draw: {odds.get('draw')}, Away: {odds.get('away_win')}")
+        
+        logger.info("=== End of Message Processing ===")
+        
     except Exception as e:
         logger.error(f"Error handling prediction message: {str(e)}")
+        logger.error(f"Failed message content: {json.dumps(message, indent=2)}")
+        raise
 
 
 @app.on_event("startup")
@@ -135,19 +160,10 @@ async def get_prediction(match_id: str) -> Dict[str, Any]:
     Raises:
         HTTPException: If prediction not found
     """
-    try:
-        prediction = await predictions.get_prediction_from_db(match_id)
-        if not prediction:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No prediction found for match {match_id}"
-            )
-        return prediction
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching prediction for match {match_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error"
-        ) 
+    # TODO: Implement prediction retrieval from database
+    # For now, return a mock response
+    return {
+        "match_id": match_id,
+        "status": "pending",
+        "message": "Database integration pending. Predictions will be stored and retrieved from database in future implementation."
+    } 

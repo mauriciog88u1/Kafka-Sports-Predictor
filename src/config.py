@@ -16,14 +16,14 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     PORT: int = 8000
 
-    # Database settings
-    DB_HOST: str
-    DB_PORT: int = 3306
-    DB_NAME: str
-    DB_USER: str
-    DB_PASSWORD: str
-    DB_PRIVATE_IP: bool = True
-    DB_SSL_MODE: str = "verify-ca"
+    # TODO: Database settings will be added in future implementation
+    # DB_HOST: str
+    # DB_PORT: int = 3306
+    # DB_NAME: str
+    # DB_USER: str
+    # DB_PASSWORD: str
+    # DB_PRIVATE_IP: bool = True
+    # DB_SSL_MODE: str = "verify-ca"
 
     # Kafka settings
     KAFKA_BOOTSTRAP: str

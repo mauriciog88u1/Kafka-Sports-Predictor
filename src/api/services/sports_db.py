@@ -3,6 +3,7 @@ import logging
 from typing import Dict, Any, List
 import httpx
 from src.config import settings
+from src.api.services.data_transformer import DataTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ async def get_match_data(match_id: str) -> Dict[str, Any]:
                 "strTimestamp": f"{event['dateEvent']}T{event['strTime']}",
                 "intHomeScore": int(event["intHomeScore"]) if event.get("intHomeScore") not in (None, "") else None,
                 "intAwayScore": int(event["intAwayScore"]) if event.get("intAwayScore") not in (None, "") else None,
-                "strStatus": event["strStatus"],
+                "strStatus": DataTransformer.map_status(event.get("strStatus")),
                 "team_stats": {
                     "home": {
                         "form": home_team_form,
@@ -134,9 +135,11 @@ def calculate_team_form(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
             "wins": 0,
             "draws": 0,
             "losses": 0,
-            "goals_for": 0,
-            "goals_against": 0,
-            "form_rating": 0.0
+            "goals_scored": 0,
+            "goals_conceded": 0,
+            "clean_sheets": 0,
+            "failed_to_score": 0,
+            "form_score": 0.0
         }
     
     form = {
@@ -144,8 +147,10 @@ def calculate_team_form(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
         "wins": 0,
         "draws": 0,
         "losses": 0,
-        "goals_for": 0,
-        "goals_against": 0
+        "goals_scored": 0,
+        "goals_conceded": 0,
+        "clean_sheets": 0,
+        "failed_to_score": 0
     }
     
     for match in matches[:5]:
@@ -154,8 +159,8 @@ def calculate_team_form(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
         
         if match.get("strHomeTeam") == match.get("strTeam"):
             # Team is home
-            form["goals_for"] += home_score
-            form["goals_against"] += away_score
+            form["goals_scored"] += home_score
+            form["goals_conceded"] += away_score
             
             if home_score > away_score:
                 form["wins"] += 1
@@ -166,10 +171,17 @@ def calculate_team_form(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 form["losses"] += 1
                 form["last_5"].append("L")
+                
+            # Check for clean sheet
+            if away_score == 0:
+                form["clean_sheets"] += 1
+            # Check for failed to score
+            if home_score == 0:
+                form["failed_to_score"] += 1
         else:
             # Team is away
-            form["goals_for"] += away_score
-            form["goals_against"] += home_score
+            form["goals_scored"] += away_score
+            form["goals_conceded"] += home_score
             
             if away_score > home_score:
                 form["wins"] += 1
@@ -180,14 +192,33 @@ def calculate_team_form(matches: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 form["losses"] += 1
                 form["last_5"].append("L")
+                
+            # Check for clean sheet
+            if home_score == 0:
+                form["clean_sheets"] += 1
+            # Check for failed to score
+            if away_score == 0:
+                form["failed_to_score"] += 1
     
-    # Calculate form rating (points per game)
-    total_matches = len(form["last_5"])
-    if total_matches > 0:
-        form["form_rating"] = (form["wins"] * 3 + form["draws"]) / total_matches
-    else:
-        form["form_rating"] = 0.0
+    # Calculate form score based on performance metrics
+    # Each win is worth 3 points, draw 1 point
+    points = form["wins"] * 3 + form["draws"]
+    max_points = len(form["last_5"]) * 3  # Maximum possible points from matches played
     
+    # Calculate goal difference impact
+    goal_diff = form["goals_scored"] - form["goals_conceded"]
+    
+    # Calculate form score components
+    match_points = (points / max_points) * 50 if max_points > 0 else 0  # 50% weight on match results
+    goal_impact = min(max(goal_diff, -5), 5) * 5  # 25% weight on goal difference (-25 to +25)
+    clean_sheet_bonus = (form["clean_sheets"] / len(form["last_5"])) * 15 if form["last_5"] else 0  # 15% weight on clean sheets
+    scoring_penalty = (form["failed_to_score"] / len(form["last_5"])) * -10 if form["last_5"] else 0  # 10% penalty on failing to score
+    
+    # Calculate total form score (0-100 scale)
+    form_score = match_points + goal_impact + clean_sheet_bonus + scoring_penalty
+    form_score = min(max(form_score, 0), 100)  # Clamp between 0 and 100
+    
+    form["form_score"] = round(form_score, 1)
     return form
 
 

@@ -26,6 +26,7 @@ services:
       - KAFKA_CONSUMER_MAX_POLL_RECORDS=500
       - KAFKA_CONSUMER_SESSION_TIMEOUT_MS=45000
       - KAFKA_CONSUMER_HEARTBEAT_INTERVAL_MS=15000
+      - DATABASE_URL=mysql+pymysql://dev:Heiweehtoo88@10.127.80.3:3306/sports_predictor
     networks:
       - app-network
     depends_on:
@@ -60,4 +61,7 @@ services:
 
 networks:
   app-network:
-    driver: bridge 
+    driver: bridge
+
+volumes:
+  postgres_data: 

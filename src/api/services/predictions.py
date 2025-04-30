@@ -42,7 +42,17 @@ async def get_prediction_from_db(match_id: str) -> Optional[Dict[str, Any]]:
                 "home_win_prob": float(row.home_win_prob),
                 "draw_prob": float(row.draw_prob),
                 "away_win_prob": float(row.away_win_prob),
-                "timestamp": row.timestamp.isoformat()
+                "confidence": float(row.confidence) if hasattr(row, 'confidence') else 0.85,  # Default confidence
+                "timestamp": row.timestamp.isoformat(),
+                "model_version": getattr(row, 'model_version', '1.0.0'),  # Default version
+                "additional_info": {
+                    "expected_goals_home": float(getattr(row, 'expected_goals_home', 1.8)),  # Default xG
+                    "expected_goals_away": float(getattr(row, 'expected_goals_away', 1.2)),  # Default xG
+                    "key_factors": getattr(row, 'key_factors', []) or [
+                        "Home team recent form",
+                        "Head to head record"
+                    ]
+                }
             }
             
     except Exception as e:

@@ -89,13 +89,20 @@ async def store_prediction(match_id: str, odds: Dict[str, float]) -> None:
         query = sa.text(
             """
             INSERT INTO predictions 
-            (match_id, home_win_prob, draw_prob, away_win_prob, timestamp)
+            (match_id, home_win_prob, draw_prob, away_win_prob, confidence, 
+             model_version, expected_goals_home, expected_goals_away, key_factors, timestamp)
             VALUES 
-            (:match_id, :home_prob, :draw_prob, :away_prob, NOW())
+            (:match_id, :home_prob, :draw_prob, :away_prob, :confidence,
+             :model_version, :expected_goals_home, :expected_goals_away, :key_factors, NOW())
             ON DUPLICATE KEY UPDATE
             home_win_prob = :home_prob,
             draw_prob = :draw_prob,
             away_win_prob = :away_prob,
+            confidence = :confidence,
+            model_version = :model_version,
+            expected_goals_home = :expected_goals_home,
+            expected_goals_away = :expected_goals_away,
+            key_factors = :key_factors,
             timestamp = NOW()
             """
         )
@@ -105,7 +112,15 @@ async def store_prediction(match_id: str, odds: Dict[str, float]) -> None:
                 "match_id": match_id,
                 "home_prob": 1 / odds["home"],
                 "draw_prob": 1 / odds["draw"],
-                "away_prob": 1 / odds["away"]
+                "away_prob": 1 / odds["away"],
+                "confidence": 0.85,  # Default confidence
+                "model_version": "1.0.0",  # Default version
+                "expected_goals_home": 1.8,  # Default xG
+                "expected_goals_away": 1.2,  # Default xG
+                "key_factors": json.dumps([
+                    "Home team recent form",
+                    "Head to head record"
+                ])
             }
         )
         await db.commit()

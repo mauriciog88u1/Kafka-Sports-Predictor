@@ -18,5 +18,5 @@ COPY . .
 ENV PORT=8080
 ENV PYTHONPATH=/app
 
-# Run the application
-CMD exec uvicorn src.api.main:app --host 0.0.0.0 --port $PORT 
+# Run the application in production mode
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8080"] 

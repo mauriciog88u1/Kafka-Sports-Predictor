@@ -36,7 +36,8 @@ async def get_producer() -> AIOKafkaProducer:
             sasl_mechanism=settings.KAFKA_SASL_MECHANISM,
             sasl_plain_username=settings.KAFKA_USERNAME,
             sasl_plain_password=settings.KAFKA_PASSWORD,
-            ssl_context=ssl_context
+            ssl_context=ssl_context,
+            acks=settings.KAFKA_PRODUCER_ACKS
         )
         await producer.start()
         logger.info("Kafka producer initialized")
@@ -71,10 +72,16 @@ async def get_consumer(handler: MessageHandler) -> AIOKafkaConsumer:
             sasl_mechanism=settings.KAFKA_SASL_MECHANISM,
             sasl_plain_username=settings.KAFKA_USERNAME,
             sasl_plain_password=settings.KAFKA_PASSWORD,
-            ssl_context=ssl_context
+            ssl_context=ssl_context,
+            value_deserializer=lambda v: json.loads(v.decode('utf-8'))
         )
+        
+        # Subscribe to topic
         await consumer.start()
-        logger.info("Kafka consumer initialized")
+        logger.info(f"Kafka consumer initialized for topic {settings.KAFKA_TOPIC}")
+        logger.info(f"Consumer group: {settings.KAFKA_GROUP_ID}")
+        logger.info(f"Auto offset reset: {settings.KAFKA_CONSUMER_AUTO_OFFSET_RESET}")
+        logger.info(f"Auto commit: {settings.KAFKA_CONSUMER_ENABLE_AUTO_COMMIT}")
         
         # Start consuming messages in the background
         asyncio.create_task(consume_messages(consumer, handler))
@@ -91,21 +98,28 @@ async def consume_messages(consumer: AIOKafkaConsumer, handler: MessageHandler) 
     try:
         async for msg in consumer:
             try:
-                # Decode message
-                message_data = json.loads(msg.value.decode())
-                logger.debug(f"Received message: {json.dumps(message_data, indent=2)}")
+                # Log message receipt
+                logger.info(f"Received message from partition {msg.partition} at offset {msg.offset}")
+                logger.debug(f"Message content: {json.dumps(msg.value, indent=2)}")
                 
-                # Handle message
-                handler(message_data)
+                # Handle message asynchronously
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(msg.value)
+                else:
+                    handler(msg.value)
                 
                 # Commit offset if auto commit is disabled
                 if not settings.KAFKA_CONSUMER_ENABLE_AUTO_COMMIT:
                     await consumer.commit()
+                    logger.debug(f"Committed offset {msg.offset} for partition {msg.partition}")
                     
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to decode message: {str(e)}")
+                logger.error(f"Raw message: {msg.value}")
             except Exception as e:
                 logger.error(f"Error processing message: {str(e)}")
+                logger.error(f"Message content: {msg.value}")
+                
     except Exception as e:
         logger.error(f"Consumer error: {str(e)}")
     finally:
@@ -129,7 +143,9 @@ async def produce_message(topic: str, value: Dict[str, Any]) -> None:
         logger.debug(f"Message content: {json.dumps(value, indent=2)}")
         logger.debug(f"Message size: {len(json.dumps(value))} bytes")
         
-        await producer.send_and_wait(topic, value)
+        # Send message and wait for acknowledgment
+        future = await producer.send(topic, value)
+        await future
         logger.debug(f"Successfully produced message to topic {topic}")
     except Exception as e:
         logger.error(f"Failed to produce message: {str(e)}")

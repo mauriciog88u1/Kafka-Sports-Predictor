@@ -363,15 +363,15 @@ async def get_match_data(match_id: str, cache: Dict[str, Any]) -> Tuple[Dict[str
         
         # If not in cache, fetch from API
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # Get match details
-            match_url = f"{BASE_URL}/lookupevent.php?id={match_id}"
+        # Get match details
+        match_url = f"{BASE_URL}/lookupevent.php?id={match_id}"
             response = await client.get(match_url)
             response.raise_for_status()
             match_data = response.json()
             
             if not match_data.get("events"):
                 raise ValueError(f"No match found with ID {match_id}")
-            
+                
             event = match_data["events"][0]
             league_id = event.get("idLeague")
             

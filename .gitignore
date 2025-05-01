@@ -77,4 +77,8 @@ secrets/
 *.secrets
 kafka_*.json
 kafka_*.properties
-kafka_*.config 
+kafka_*.config
+
+# Deployment scripts with sensitive data
+deploy.sh
+docker-compose.yml 

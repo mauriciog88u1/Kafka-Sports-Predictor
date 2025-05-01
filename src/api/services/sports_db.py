@@ -10,75 +10,73 @@ from src.api.services.data_transformer import DataTransformer
 import math
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 # Configure logging for GCP
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 BASE_URL = f"https://www.thesportsdb.com/api/v1/json/{settings.SPORTSDB_API_KEY}"
-CACHE_FILE = "/tmp/league_cache.json"  # Use /tmp directory which is writable in Cloud Run
-CACHE_EXPIRY_HOURS = 24  # Cache expires after 24 hours
-RATE_LIMIT_REQUESTS = 10  # Maximum requests per minute
-RATE_LIMIT_WINDOW = 60  # Time window in seconds
-BATCH_SIZE = 5  # Process matches in batches of 5
+CACHE_FILE = "/tmp/league_cache.json"
+CACHE_EXPIRY_HOURS = 24
+BATCH_SIZE = 20  # Increased batch size for faster processing
+MAX_CONCURRENT_REQUESTS = 10  # Increased concurrent requests
 
-# Rate limiting state
-last_request_time = 0
-request_count = 0
+# Global cache
+cache = None
+last_cache_load = None
 
 def load_cache() -> Dict[str, Any]:
-    """Load league data from cache file."""
-    logger.info({
-        "message": "Attempting to load cache",
-        "cache_file": CACHE_FILE,
-        "exists": os.path.exists(CACHE_FILE)
-    })
+    """Load league data from cache file with in-memory caching."""
+    global cache, last_cache_load
+    
+    # Check if in-memory cache is still valid
+    if cache is not None and last_cache_load is not None:
+        if (datetime.now() - last_cache_load).total_seconds() < 60:  # Refresh every minute
+            return cache
     
     if not os.path.exists(CACHE_FILE):
-        logger.info({"message": "Cache file does not exist, returning empty cache"})
-        return {"last_updated": None, "leagues": {}}
+        cache = {
+            "last_updated": None,
+            "matches": {},  # Direct match ID lookup
+            "leagues": {}   # League data for reference
+        }
+        last_cache_load = datetime.now()
+        return cache
     
     try:
         with open(CACHE_FILE, 'r') as f:
             cache = json.load(f)
-            # Convert string timestamp to datetime
             if cache["last_updated"]:
                 cache["last_updated"] = datetime.fromisoformat(cache["last_updated"])
-                logger.info({
-                    "message": "Cache loaded successfully",
-                    "last_updated": cache["last_updated"].isoformat(),
-                    "leagues_cached": len(cache["leagues"])
-                })
+            last_cache_load = datetime.now()
             return cache
     except Exception as e:
-        logger.error({
-            "message": "Error loading cache",
-            "error": str(e),
-            "cache_file": CACHE_FILE
-        })
-        return {"last_updated": None, "leagues": {}}
+        logger.error(f"Error loading cache: {str(e)}")
+        cache = {
+            "last_updated": None,
+            "matches": {},
+            "leagues": {}
+        }
+        last_cache_load = datetime.now()
+        return cache
 
-def save_cache(cache: Dict[str, Any]) -> None:
-    """Save league data to cache file."""
+def save_cache(cache_data: Dict[str, Any]) -> None:
+    """Save league data to cache file and update in-memory cache."""
+    global cache, last_cache_load
     try:
-        # Convert datetime to string for JSON serialization
-        cache_copy = cache.copy()
+        cache_copy = cache_data.copy()
         if cache_copy["last_updated"]:
             cache_copy["last_updated"] = cache_copy["last_updated"].isoformat()
         
         with open(CACHE_FILE, 'w') as f:
             json.dump(cache_copy, f)
-            logger.info({
-                "message": "Cache saved successfully",
-                "cache_file": CACHE_FILE,
-                "leagues_cached": len(cache["leagues"])
-            })
+        
+        # Update in-memory cache
+        cache = cache_data
+        last_cache_load = datetime.now()
     except Exception as e:
-        logger.error({
-            "message": "Error saving cache",
-            "error": str(e),
-            "cache_file": CACHE_FILE
-        })
+        logger.error(f"Error saving cache: {str(e)}")
 
 def is_cache_valid(cache: Dict[str, Any]) -> bool:
     """Check if cache is still valid."""
@@ -313,91 +311,60 @@ def calculate_odds(probabilities: Dict[str, float]) -> Dict[str, float]:
     }
 
 
-async def rate_limit():
-    """Implement rate limiting for API requests."""
-    global last_request_time, request_count
-    
-    current_time = time.time()
-    if current_time - last_request_time > RATE_LIMIT_WINDOW:
-        # Reset counter if window has passed
-        request_count = 0
-        last_request_time = current_time
-    
-    if request_count >= RATE_LIMIT_REQUESTS:
-        # Wait until the rate limit window resets
-        wait_time = RATE_LIMIT_WINDOW - (current_time - last_request_time)
-        if wait_time > 0:
-            logger.info(f"Rate limit reached, waiting {wait_time:.2f} seconds")
-            await asyncio.sleep(wait_time)
-            request_count = 0
-            last_request_time = time.time()
-    
-    request_count += 1
-
 async def process_match_batch(match_ids: List[str]) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
-    """Process a batch of match IDs with rate limiting.
-    
-    Args:
-        match_ids: List of match IDs to process
-        
-    Returns:
-        Tuple containing:
-        - List of successfully processed match data
-        - List of errors encountered
-    """
+    """Process a batch of match IDs with optimized caching."""
     results = []
     errors = []
     
-    for match_id in match_ids:
-        try:
-            # Apply rate limiting
-            await rate_limit()
-            
-            # Get match data
-            match_data, is_cached = await get_match_data(match_id)
-            if match_data:
-                results.append(match_data)
-        except Exception as e:
-            errors.append({
-                "match_id": match_id,
-                "error": str(e)
-            })
+    # Load cache once for the entire batch
+    cache = load_cache()
+    
+    # Split match IDs into batches
+    batches = [match_ids[i:i + BATCH_SIZE] for i in range(0, len(match_ids), BATCH_SIZE)]
+    
+    for batch in batches:
+        # Process each batch concurrently
+        tasks = [process_single_match(match_id, cache) for match_id in batch]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for result in batch_results:
+            if isinstance(result, Exception):
+                errors.append({
+                    "match_id": result.match_id if hasattr(result, 'match_id') else 'unknown',
+                    "error": str(result)
+                })
+            else:
+                results.append(result)
     
     return results, errors
 
-async def get_match_data(match_id: str) -> Tuple[Dict[str, Any], bool]:
-    """Fetch match data from TheSportsDB API or cache.
-    
-    Args:
-        match_id: The ID of the match to fetch
-        
-    Returns:
-        Tuple containing:
-        - Dict containing match data and team statistics
-        - Boolean indicating if data came from cache
-    """
+async def process_single_match(match_id: str, cache: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a single match with optimized caching."""
     try:
-        logger.info({
-            "message": "Fetching match data",
-            "match_id": match_id
-        })
-        
         # Check cache first
-        cache = load_cache()
-        if is_cache_valid(cache):
-            for league_id, matches in cache["leagues"].items():
-                for match in matches:
-                    if match["idEvent"] == match_id:
-                        logger.info({
-                            "message": "Using cached match data",
-                            "match_id": match_id,
-                            "league_id": league_id
-                        })
-                        return match, True
+        if is_cache_valid(cache) and match_id in cache["matches"]:
+            return cache["matches"][match_id]
         
         # If not in cache, fetch from API
-        match_url = f"{BASE_URL}/lookupevent.php?id={match_id}"
-        async with httpx.AsyncClient() as client:
+        match_data, is_cached = await get_match_data(match_id, cache)
+        if match_data:
+            return match_data
+        raise ValueError(f"No data returned for match {match_id}")
+    except Exception as e:
+        e.match_id = match_id
+        raise
+
+async def get_match_data(match_id: str, cache: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    """Fetch match data from TheSportsDB API or cache."""
+    try:
+        # Check cache first with direct lookup
+        if is_cache_valid(cache) and match_id in cache["matches"]:
+            return cache["matches"][match_id], True
+        
+        # If not in cache, fetch from API
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Get match details
+            match_url = f"{BASE_URL}/lookupevent.php?id={match_id}"
             response = await client.get(match_url)
             response.raise_for_status()
             match_data = response.json()
@@ -408,35 +375,32 @@ async def get_match_data(match_id: str) -> Tuple[Dict[str, Any], bool]:
             event = match_data["events"][0]
             league_id = event.get("idLeague")
             
-            # Get team details and last matches
+            # Get team details and last matches concurrently
             home_team_url = f"{BASE_URL}/lookupteam.php?id={event['idHomeTeam']}"
             away_team_url = f"{BASE_URL}/lookupteam.php?id={event['idAwayTeam']}"
-            
-            await rate_limit()  # Rate limit between API calls
-            
-            home_team_response = await client.get(home_team_url)
-            away_team_response = await client.get(away_team_url)
-            
-            home_team_response.raise_for_status()
-            away_team_response.raise_for_status()
-            
-            home_team_data = home_team_response.json()
-            away_team_data = away_team_response.json()
-            
-            # Get last matches
             home_matches_url = f"{BASE_URL}/eventslast.php?id={event['idHomeTeam']}"
             away_matches_url = f"{BASE_URL}/eventslast.php?id={event['idAwayTeam']}"
             
-            await rate_limit()  # Rate limit between API calls
+            # Make concurrent requests with timeout
+            tasks = [
+                client.get(home_team_url),
+                client.get(away_team_url),
+                client.get(home_matches_url),
+                client.get(away_matches_url)
+            ]
             
-            home_matches_response = await client.get(home_matches_url)
-            away_matches_response = await client.get(away_matches_url)
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
             
-            home_matches_response.raise_for_status()
-            away_matches_response.raise_for_status()
+            # Check for errors in responses
+            for i, response in enumerate(responses):
+                if isinstance(response, Exception):
+                    raise response
+                response.raise_for_status()
             
-            home_matches = home_matches_response.json()
-            away_matches = away_matches_response.json()
+            home_team_data = responses[0].json()
+            away_team_data = responses[1].json()
+            home_matches = responses[2].json()
+            away_matches = responses[3].json()
             
             # Calculate form and stats
             home_form = calculate_team_form(home_matches.get("results", []), event['idHomeTeam'])
@@ -486,7 +450,8 @@ async def get_match_data(match_id: str) -> Tuple[Dict[str, Any], bool]:
                 "odds": odds
             }
             
-            # Update cache
+            # Update cache with direct match ID lookup
+            cache["matches"][match_id] = transformed_data
             if league_id not in cache["leagues"]:
                 cache["leagues"][league_id] = []
             cache["leagues"][league_id].append(transformed_data)
@@ -496,18 +461,10 @@ async def get_match_data(match_id: str) -> Tuple[Dict[str, Any], bool]:
             return transformed_data, False
             
     except httpx.HTTPError as e:
-        logger.error({
-            "message": "HTTP error fetching match data",
-            "error": str(e),
-            "match_id": match_id
-        })
+        logger.error(f"HTTP error fetching match data: {str(e)}")
         raise
     except Exception as e:
-        logger.error({
-            "message": "Error fetching match data",
-            "error": str(e),
-            "match_id": match_id
-        })
+        logger.error(f"Error fetching match data: {str(e)}")
         raise
 
 

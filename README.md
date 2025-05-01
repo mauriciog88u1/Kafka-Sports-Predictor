@@ -3,6 +3,100 @@
 ## Overview
 A high-performance match prediction system that combines real-time data processing with machine learning to provide football match predictions. The system uses a hybrid architecture, leveraging both synchronous API responses and asynchronous Kafka processing for optimal performance.
 
+## Project Structure
+```
+bet365-predictor/
+├── src/                              # Application source code
+│   ├── api/                          # API implementation
+│   │   ├── consumers/                # Kafka consumers
+│   │   │   ├── __init__.py
+│   │   │   └── match_consumer.py     # Match data consumer
+│   │   ├── routes/                   # API routes
+│   │   │   ├── __init__.py
+│   │   │   ├── matches.py           # Match endpoints
+│   │   │   └── predictions.py        # Prediction endpoints
+│   │   └── services/                 # Business logic
+│   │       ├── sports_db.py         # Sports data service
+│   │       └── cache.py             # Caching service
+│   ├── models/                       # Data models
+│   │   ├── __init__.py
+│   │   ├── match.py                 # Match model
+│   │   └── prediction.py            # Prediction model
+│   ├── ml/                          # Machine learning components
+│   │   ├── __init__.py
+│   │   ├── expected_goals.py        # xG calculator
+│   │   └── odds_calculator.py       # Odds calculator
+│   └── utils/                        # Utility functions
+│       ├── __init__.py
+│       └── validation.py            # Data validation
+├── tests/                           # Test suite
+│   ├── unit/                        # Unit tests
+│   │   ├── test_api.py
+│   │   └── test_ml.py
+│   ├── integration/                 # Integration tests
+│   │   └── test_kafka.py
+│   ├── fixtures/                    # Test fixtures
+│   │   └── match_data.json
+│   └── conftest.py                  # Test configuration
+├── scripts/                         # Utility scripts
+│   ├── setup_env.sh                # Environment setup
+│   └── run_tests.sh                # Test runner
+├── migrations/                      # Database migrations
+│   ├── versions/
+│   └── env.py
+├── docs/                           # Documentation
+│   ├── API_SCHEMA.md              # API documentation
+│   └── DEPLOYMENT.md              # Deployment guide
+├── .github/                        # GitHub configurations
+│   └── workflows/                  # CI/CD workflows
+├── docker/                         # Docker configurations
+│   ├── Dockerfile                 # API service Dockerfile
+│   └── docker-compose.yml         # Local development setup
+├── config/                         # Configuration files
+│   ├── .env.example              # Environment variables template
+│   └── alembic.ini               # Migration configuration
+├── requirements/                   # Dependencies
+│   ├── base.txt                  # Common dependencies
+│   ├── dev.txt                   # Development dependencies
+│   └── prod.txt                  # Production dependencies
+├── .gitignore                     # Git ignore rules
+├── README.md                      # Project documentation
+└── setup.py                       # Package setup
+```
+
+### Directory Structure Explanation
+
+#### Core Application (`src/`)
+- `api/`: FastAPI application implementation
+  - `consumers/`: Kafka consumers for async processing
+  - `routes/`: API endpoint definitions
+  - `services/`: Business logic and external services
+- `models/`: Pydantic models and database schemas
+- `ml/`: Machine learning components and algorithms
+- `utils/`: Shared utility functions
+
+#### Testing (`tests/`)
+- `unit/`: Unit tests for individual components
+- `integration/`: Integration tests for system flows
+- `fixtures/`: Test data and fixtures
+- All test files follow `test_*.py` naming convention
+
+#### Configuration (`config/`)
+- Environment variable templates
+- Database migration settings
+- Separate configs for development and production
+
+#### Documentation (`docs/`)
+- API documentation and schemas
+- Deployment and setup guides
+- Architecture documentation
+
+#### Infrastructure
+- `docker/`: All Docker-related configurations
+- `migrations/`: Database migration scripts
+- `scripts/`: Utility and automation scripts
+- `requirements/`: Separated dependency files
+
 ## Architecture
 
 ### Core Components

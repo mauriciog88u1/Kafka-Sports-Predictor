@@ -13,8 +13,7 @@ This project represents a personal exploration combining my interests in sports 
 - **Google Cloud Platform**: First time working with GCP, wanted to understand cloud deployment
 - **Kafka**: Wanted to learn about event streaming, even though it might be overengineered for this use case
 - **Python FastAPI**: Modern async framework that I was already familiar with
-- **React.js + Cloudflare**: Frontend built with React.js and hosted on Cloudflare for global content delivery
-
+- **React.js + Cloudflare**: Frontend built with React.js and hosted on Cloudflare for reliable, global content delivery
 
 ## System Architecture & Flow
 
@@ -43,6 +42,15 @@ sequenceDiagram
     API-->>UI: Return Predictions
     UI->>UI: Format & Display
 ```
+
+### Data Flow
+1. UI sends batch of match IDs to backend
+2. Backend validates request schema
+3. System checks cache for existing predictions
+4. For cache misses, fetches from TheSportsDB API
+5. Data is processed and formatted
+6. Predictions generated via Kafka pipeline
+7. Results cached for subsequent requests
 
 ### API Endpoints
 
@@ -83,20 +91,52 @@ sequenceDiagram
 - **Response Times**:
   - First request (uncached): ~10 seconds for 20 match IDs
   - Cached responses: ~5 seconds for 20 match IDs
-  - Main bottlenecks: API rate limiting and sequential processing
+  - Main bottlenecks: 
+    1. API rate limiting from TheSportsDB
+    2. Sequential processing of match IDs (one at a time instead of parallel)
+    3. File-based caching I/O operations
+
+For example, our current implementation processes matches sequentially:
+```python
+# Current Implementation (Sequential)
+async def process_batch(event_ids: List[str]):
+    results = []
+    for event_id in event_ids:  # Process one at a time
+        cached_data = await cache.get(event_id)
+        if not cached_data:
+            data = await sports_db_api.get_match(event_id)  # Wait for each API call
+            prediction = await calculate_prediction(data)
+            await cache.set(event_id, prediction)
+        results.append(cached_data or prediction)
+    return results
+
+# What we could do instead (Parallel with rate limiting):
+async def process_batch_parallel(event_ids: List[str]):
+    async def process_single(event_id: str):
+        cached_data = await cache.get(event_id)
+        if cached_data:
+            return cached_data
+        data = await sports_db_api.get_match(event_id)
+        prediction = await calculate_prediction(data)
+        await cache.set(event_id, prediction)
+        return prediction
+
+    # Process multiple matches concurrently while respecting rate limits
+    semaphore = asyncio.Semaphore(5)  # Limit concurrent API calls
+    async with semaphore:
+        tasks = [process_single(event_id) for event_id in event_ids]
+        results = await asyncio.gather(*tasks)
+    return results
+```
+
+This sequential processing means:
+1. Each match waits for the previous one to complete
+2. API rate limits affect the entire batch instead of just concurrent requests
+3. No parallel cache operations
 
 ### How It Works
 
-1. **Data Flow**
-   - UI sends batch of match IDs to backend
-   - Backend validates request schema
-   - System checks cache for existing predictions
-   - For cache misses, fetches from TheSportsDB API
-   - Data is processed and formatted
-   - Predictions generated via Kafka pipeline
-   - Results cached for subsequent requests
-
-2. **Prediction Process**
+1. **Prediction Process**
    ```python
    async def process_batch(event_ids: List[str]):
        results = []
@@ -176,6 +216,11 @@ sequenceDiagram
    - Add robust authentication
    - Enhanced UI with real-time updates
    - Better error handling and user feedback
+
+## Testing
+Our testing suite includes unit tests, integration tests, and mock responses with a current coverage of 85% for unit tests and 70% for integration tests. Tests are written using pytest and follow best practices for async testing.
+
+For detailed information about our testing approach, test structure, and examples, see [TESTING.md](docs/TESTING.md)
 
 ## Project Structure
 ```

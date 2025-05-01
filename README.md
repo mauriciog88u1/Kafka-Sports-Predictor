@@ -110,23 +110,6 @@ async def process_batch(event_ids: List[str]):
         results.append(cached_data or prediction)
     return results
 
-# What we could do instead (Parallel with rate limiting):
-async def process_batch_parallel(event_ids: List[str]):
-    async def process_single(event_id: str):
-        cached_data = await cache.get(event_id)
-        if cached_data:
-            return cached_data
-        data = await sports_db_api.get_match(event_id)
-        prediction = await calculate_prediction(data)
-        await cache.set(event_id, prediction)
-        return prediction
-
-    # Process multiple matches concurrently while respecting rate limits
-    semaphore = asyncio.Semaphore(5)  # Limit concurrent API calls
-    async with semaphore:
-        tasks = [process_single(event_id) for event_id in event_ids]
-        results = await asyncio.gather(*tasks)
-    return results
 ```
 
 This sequential processing means:

@@ -140,58 +140,20 @@ async def process_match_batch(request: MatchBatchRequest) -> MatchBatchResponse:
             detail="Duplicate match IDs in request"
         )
     
-    processed = 0
-    errors = []
-    results = []
-    
-    for match_id in request.match_ids:
-        try:
-            # Get match data (which includes calculated odds)
-            match_data, is_cached = await sports_db.get_match_data(match_id)
-            
-            # Validate data
-            try:
-                validator.validate_match_update(match_data)
-            except Exception as e:
-                logger.error(f"Validation error for match {match_id}: {str(e)}")
-                errors.append({
-                    "match_id": match_id,
-                    "error": str(e)
-                })
-                continue
-            
-            # Only produce to Kafka if we got fresh data (not from cache)
-            if not is_cached:
-                # Produce to Kafka with detailed logging
-                logger.info(f"Producing message to Kafka for match {match_id}")
-                logger.debug(f"Message content: {json.dumps(match_data, indent=2)}")
-                
-                try:
-                    await kafka.produce_message(
-                        topic=settings.KAFKA_TOPIC,
-                        value=match_data
-                    )
-                    logger.info(f"Successfully produced message to Kafka for match {match_id}")
-                except Exception as e:
-                    logger.error(f"Failed to produce message to Kafka for match {match_id}: {str(e)}")
-                    raise
-            
-            processed += 1
-            results.append(match_data)
-            
-        except Exception as e:
-            logger.error(f"Error processing match {match_id}: {str(e)}")
-            errors.append({
-                "match_id": match_id,
-                "error": str(e)
-            })
-    
-    return MatchBatchResponse(
-        status="success",
-        processed=processed,
-        errors=errors,
-        results=results
-    )
+    try:
+        # Process matches in batches with rate limiting
+        results, errors = await sports_db.process_match_batch(request.match_ids)
+        
+        return MatchBatchResponse(
+            status="success",
+            processed=len(results),
+            errors=errors,
+            results=results
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing batch: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/v1/predictions/{match_id}")

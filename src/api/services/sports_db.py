@@ -1,6 +1,6 @@
 """Sports DB API service."""
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 import httpx
 import json
 import os
@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from src.config import settings
 from src.api.services.data_transformer import DataTransformer
 import math
+import asyncio
+import time
 
 # Configure logging for GCP
 logger = logging.getLogger(__name__)
@@ -16,6 +18,13 @@ logger.setLevel(logging.INFO)
 BASE_URL = f"https://www.thesportsdb.com/api/v1/json/{settings.SPORTSDB_API_KEY}"
 CACHE_FILE = "/tmp/league_cache.json"  # Use /tmp directory which is writable in Cloud Run
 CACHE_EXPIRY_HOURS = 24  # Cache expires after 24 hours
+RATE_LIMIT_REQUESTS = 10  # Maximum requests per minute
+RATE_LIMIT_WINDOW = 60  # Time window in seconds
+BATCH_SIZE = 5  # Process matches in batches of 5
+
+# Rate limiting state
+last_request_time = 0
+request_count = 0
 
 def load_cache() -> Dict[str, Any]:
     """Load league data from cache file."""
@@ -304,15 +313,68 @@ def calculate_odds(probabilities: Dict[str, float]) -> Dict[str, float]:
     }
 
 
-async def get_match_data(match_id: str) -> Dict[str, Any]:
+async def rate_limit():
+    """Implement rate limiting for API requests."""
+    global last_request_time, request_count
+    
+    current_time = time.time()
+    if current_time - last_request_time > RATE_LIMIT_WINDOW:
+        # Reset counter if window has passed
+        request_count = 0
+        last_request_time = current_time
+    
+    if request_count >= RATE_LIMIT_REQUESTS:
+        # Wait until the rate limit window resets
+        wait_time = RATE_LIMIT_WINDOW - (current_time - last_request_time)
+        if wait_time > 0:
+            logger.info(f"Rate limit reached, waiting {wait_time:.2f} seconds")
+            await asyncio.sleep(wait_time)
+            request_count = 0
+            last_request_time = time.time()
+    
+    request_count += 1
+
+async def process_match_batch(match_ids: List[str]) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """Process a batch of match IDs with rate limiting.
+    
+    Args:
+        match_ids: List of match IDs to process
+        
+    Returns:
+        Tuple containing:
+        - List of successfully processed match data
+        - List of errors encountered
     """
-    Fetch match data from TheSportsDB API or cache and transform it into a structured format.
+    results = []
+    errors = []
+    
+    for match_id in match_ids:
+        try:
+            # Apply rate limiting
+            await rate_limit()
+            
+            # Get match data
+            match_data, is_cached = await get_match_data(match_id)
+            if match_data:
+                results.append(match_data)
+        except Exception as e:
+            errors.append({
+                "match_id": match_id,
+                "error": str(e)
+            })
+    
+    return results, errors
+
+async def get_match_data(match_id: str) -> Tuple[Dict[str, Any], bool]:
+    """Fetch match data from TheSportsDB API or cache.
     
     Args:
         match_id: The ID of the match to fetch
         
     Returns:
-        Dict containing match data and team statistics
+        Tuple containing:
+        - Dict containing match data and team statistics
+        - Boolean indicating if data came from cache
     """
     try:
         logger.info({
@@ -320,7 +382,20 @@ async def get_match_data(match_id: str) -> Dict[str, Any]:
             "match_id": match_id
         })
         
-        # Get match details
+        # Check cache first
+        cache = load_cache()
+        if is_cache_valid(cache):
+            for league_id, matches in cache["leagues"].items():
+                for match in matches:
+                    if match["idEvent"] == match_id:
+                        logger.info({
+                            "message": "Using cached match data",
+                            "match_id": match_id,
+                            "league_id": league_id
+                        })
+                        return match, True
+        
+        # If not in cache, fetch from API
         match_url = f"{BASE_URL}/lookupevent.php?id={match_id}"
         async with httpx.AsyncClient() as client:
             response = await client.get(match_url)
@@ -328,46 +403,16 @@ async def get_match_data(match_id: str) -> Dict[str, Any]:
             match_data = response.json()
             
             if not match_data.get("events"):
-                logger.error({
-                    "message": "No match found",
-                    "match_id": match_id
-                })
                 raise ValueError(f"No match found with ID {match_id}")
-                
+            
             event = match_data["events"][0]
             league_id = event.get("idLeague")
             
-            logger.info({
-                "message": "Match details retrieved",
-                "match_id": match_id,
-                "league_id": league_id,
-                "event": event["strEvent"],
-                "date": event["dateEvent"]
-            })
-            
-            # Check cache first
-            cache = load_cache()
-            if is_cache_valid(cache) and league_id in cache["leagues"]:
-                # Check if match exists in cached league data
-                for cached_match in cache["leagues"][league_id]:
-                    if cached_match["idEvent"] == match_id:
-                        logger.info({
-                            "message": "Using cached match data",
-                            "match_id": match_id,
-                            "league_id": league_id,
-                            "cache_hit": True
-                        })
-                        return cached_match
-            
-            logger.info({
-                "message": "Cache miss - fetching fresh data",
-                "match_id": match_id,
-                "league_id": league_id
-            })
-            
-            # Get team details for both home and away teams
+            # Get team details and last matches
             home_team_url = f"{BASE_URL}/lookupteam.php?id={event['idHomeTeam']}"
             away_team_url = f"{BASE_URL}/lookupteam.php?id={event['idAwayTeam']}"
+            
+            await rate_limit()  # Rate limit between API calls
             
             home_team_response = await client.get(home_team_url)
             away_team_response = await client.get(away_team_url)
@@ -378,40 +423,32 @@ async def get_match_data(match_id: str) -> Dict[str, Any]:
             home_team_data = home_team_response.json()
             away_team_data = away_team_response.json()
             
-            logger.info({
-                "message": "Team details retrieved",
-                "home_team": event["strHomeTeam"],
-                "away_team": event["strAwayTeam"]
-            })
+            # Get last matches
+            home_matches_url = f"{BASE_URL}/eventslast.php?id={event['idHomeTeam']}"
+            away_matches_url = f"{BASE_URL}/eventslast.php?id={event['idAwayTeam']}"
             
-            # Get last 5 matches for both teams
-            home_team_last_matches_url = f"{BASE_URL}/eventslast.php?id={event['idHomeTeam']}"
-            away_team_last_matches_url = f"{BASE_URL}/eventslast.php?id={event['idAwayTeam']}"
+            await rate_limit()  # Rate limit between API calls
             
-            home_team_last_matches_response = await client.get(home_team_last_matches_url)
-            away_team_last_matches_response = await client.get(away_team_last_matches_url)
+            home_matches_response = await client.get(home_matches_url)
+            away_matches_response = await client.get(away_matches_url)
             
-            home_team_last_matches_response.raise_for_status()
-            away_team_last_matches_response.raise_for_status()
+            home_matches_response.raise_for_status()
+            away_matches_response.raise_for_status()
             
-            home_team_last_matches = home_team_last_matches_response.json()
-            away_team_last_matches = away_team_last_matches_response.json()
+            home_matches = home_matches_response.json()
+            away_matches = away_matches_response.json()
             
-            # Calculate form for both teams
-            home_team_form = calculate_team_form(home_team_last_matches.get("results", []), event['idHomeTeam'])
-            away_team_form = calculate_team_form(away_team_last_matches.get("results", []), event['idAwayTeam'])
+            # Calculate form and stats
+            home_form = calculate_team_form(home_matches.get("results", []), event['idHomeTeam'])
+            away_form = calculate_team_form(away_matches.get("results", []), event['idAwayTeam'])
             
-            # Calculate expected goals
-            home_xg = calculate_expected_goals(home_team_form, True)
-            away_xg = calculate_expected_goals(away_team_form, False)
+            home_xg = calculate_expected_goals(home_form, True)
+            away_xg = calculate_expected_goals(away_form, False)
             
-            # Calculate win probabilities
-            probabilities = calculate_win_probability(home_team_form, away_team_form)
+            probabilities = calculate_win_probability(home_form, away_form)
+            odds = calculate_odds(probabilities)
             
-            # Calculate odds
-            match_odds = calculate_odds(probabilities)
-            
-            # Transform the data into our format
+            # Transform data
             transformed_data = {
                 "idEvent": event["idEvent"],
                 "strEvent": event["strEvent"],
@@ -430,23 +467,23 @@ async def get_match_data(match_id: str) -> Dict[str, Any]:
                 "strStatus": DataTransformer.map_status(event.get("strStatus")),
                 "team_stats": {
                     "home": {
-                        "form": home_team_form,
+                        "form": home_form,
                         "xg_for": home_xg,
                         "xg_against": away_xg,
-                        "avg_goals_scored": round(home_team_form["goals_scored"] / max(1, len(home_team_form["last_5"])), 2),
-                        "avg_goals_conceded": round(home_team_form["goals_conceded"] / max(1, len(home_team_form["last_5"])), 2),
+                        "avg_goals_scored": round(home_form["goals_scored"] / max(1, len(home_form["last_5"])), 2),
+                        "avg_goals_conceded": round(home_form["goals_conceded"] / max(1, len(home_form["last_5"])), 2),
                         "win_probability": probabilities["home"]
                     },
                     "away": {
-                        "form": away_team_form,
+                        "form": away_form,
                         "xg_for": away_xg,
                         "xg_against": home_xg,
-                        "avg_goals_scored": round(away_team_form["goals_scored"] / max(1, len(away_team_form["last_5"])), 2),
-                        "avg_goals_conceded": round(away_team_form["goals_conceded"] / max(1, len(away_team_form["last_5"])), 2),
+                        "avg_goals_scored": round(away_form["goals_scored"] / max(1, len(away_form["last_5"])), 2),
+                        "avg_goals_conceded": round(away_form["goals_conceded"] / max(1, len(away_form["last_5"])), 2),
                         "win_probability": probabilities["away"]
                     }
                 },
-                "odds": match_odds
+                "odds": odds
             }
             
             # Update cache
@@ -456,29 +493,13 @@ async def get_match_data(match_id: str) -> Dict[str, Any]:
             cache["last_updated"] = datetime.now()
             save_cache(cache)
             
-            logger.info({
-                "message": "Match data processed and cached",
-                "match_id": match_id,
-                "league_id": league_id,
-                "home_team": event["strHomeTeam"],
-                "away_team": event["strAwayTeam"],
-                "predictions": {
-                    "home_win_prob": probabilities["home"],
-                    "draw_prob": probabilities["draw"],
-                    "away_win_prob": probabilities["away"],
-                    "home_xg": home_xg,
-                    "away_xg": away_xg
-                }
-            })
-            
-            return transformed_data
+            return transformed_data, False
             
     except httpx.HTTPError as e:
         logger.error({
             "message": "HTTP error fetching match data",
             "error": str(e),
-            "match_id": match_id,
-            "url": match_url if 'match_url' in locals() else None
+            "match_id": match_id
         })
         raise
     except Exception as e:

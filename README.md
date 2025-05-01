@@ -13,6 +13,8 @@ This project represents a personal exploration combining my interests in sports 
 - **Google Cloud Platform**: First time working with GCP, wanted to understand cloud deployment
 - **Kafka**: Wanted to learn about event streaming, even though it might be overengineered for this use case
 - **Python FastAPI**: Modern async framework that I was already familiar with
+- **React.js + Cloudflare**: Frontend built with React.js and hosted on Cloudflare for global content delivery
+
 
 ## System Architecture & Flow
 

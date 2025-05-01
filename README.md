@@ -25,16 +25,104 @@ A high-performance match prediction system that combines real-time data processi
    - Optimized lookup performance (O(1))
 
 ### Backend Flow
-1. **Synchronous Path (Fast Response)**
-   - Check cache for existing prediction
-   - Return cached data if available
-   - Queue update in background if data is stale
 
-2. **Asynchronous Path (Fresh Data)**
-   - Fetch match data from TheSportsDB API
-   - Process through Kafka pipeline
-   - Update cache with new predictions
-   - Notify clients of updates
+1. **Match Data Processing**
+   ```python
+   # src/api/services/sports_db.py
+   async def get_match_data(match_id: str, cache: Dict[str, Any]):
+       # 1. Check cache for existing data
+       # 2. If cache miss, fetch from TheSportsDB API:
+       #    - Match details
+       #    - Team information
+       #    - Historical matches
+       # 3. Calculate form and statistics
+       # 4. Transform and cache data
+   ```
+
+2. **Team Statistics Calculation**
+   ```python
+   # src/ml/expected_goals.py
+   class ExpectedGoalsCalculator:
+       def calculate(self, data: Dict[str, Any]):
+           # 1. Calculate base xG from team stats
+           # 2. Apply league-specific factors
+           # 3. Adjust using historical data
+           # 4. Normalize within reasonable bounds
+   ```
+
+3. **Prediction Generation**
+   ```python
+   # src/api/consumers/match_consumer.py
+   async def calculate_prediction(match_data: Dict[str, Any]):
+       # 1. Extract team statistics
+       # 2. Calculate team strengths:
+       #    - Form score (40% weight)
+       #    - Goals ratio (30% weight)
+       #    - xG ratio (30% weight)
+       # 3. Apply home advantage (10% boost)
+       # 4. Calculate probabilities and confidence
+   ```
+
+4. **Odds Calculation**
+   ```python
+   # src/ml/odds_calculator.py
+   class OddsCalculator:
+       def calculate_match_odds(self, match: Match):
+           # 1. Calculate win probabilities
+           # 2. Calculate goals probabilities
+           # 3. Calculate BTTS probabilities
+           # 4. Convert to odds with margin
+   ```
+
+5. **Kafka Integration**
+   - **Producer** (API Service):
+     ```python
+     # When new match data arrives:
+     await producer.send(
+         topic="match_updates",
+         value=match_data
+     )
+     ```
+   - **Consumer** (Prediction Service):
+     ```python
+     async for msg in consumer:
+         # 1. Validate message format
+         # 2. Calculate prediction
+         # 3. Update cache
+         # 4. Send to output topic
+     ```
+
+6. **Caching System**
+   - Two-layer approach:
+     1. In-memory cache for fast access
+     2. File-based persistence for durability
+   - Cache structure:
+     ```python
+     cache = {
+         "matches": {
+             "match_id": {
+                 "data": match_data,
+                 "timestamp": cache_time,
+                 "prediction": prediction_result
+             }
+         },
+         "leagues": {
+             "league_id": [match_data_list]
+         }
+     }
+     ```
+
+7. **Response Flow**
+   ```python
+   @app.get("/api/v1/predictions/{match_id}")
+   async def get_prediction(match_id: str):
+       # 1. Check cache for prediction
+       # 2. If not found or stale:
+       #    - Fetch fresh match data
+       #    - Calculate quick prediction
+       #    - Queue for detailed analysis
+       # 3. Return prediction with confidence
+   ```
 
 ## Performance Metrics
 - Average response time (cached): ~50ms
@@ -185,19 +273,3 @@ pytest --cov=src tests/
 - WARNING: Minor issues and degraded states
 - ERROR: Serious issues requiring attention
 - CRITICAL: System-wide failures
-
-## Contributing
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-- TheSportsDB for providing match data
-- Confluent Cloud for Kafka hosting
-- Google Cloud Run for deployment
-- FastAPI framework

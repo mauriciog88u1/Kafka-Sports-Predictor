@@ -1,6 +1,6 @@
 # Bet365 Match Predictor API
 
-[Demo Available at mauric10.com](https://mauric10.com)
+[Demo Available at mauric10.com](https://mauric10.com/bet365)
 
 ## Project Background & Motivation
 

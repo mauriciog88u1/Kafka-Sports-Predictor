@@ -2,6 +2,8 @@
 import logging
 from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from src.api.services import sports_db, kafka
 from src.utils.validation import SchemaValidator
@@ -15,6 +17,40 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Sports Prediction API")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://24.1.229.192",
+        "https://24.1.229.192",
+        "http://mauric10.com",
+        "https://mauric10.com",
+        "https://bet365-predictor-api-806378004153.us-central1.run.app",
+        "http://localhost:8080",
+        "http://localhost:3000",
+        "http://localhost:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600
+)
+
+# Add OPTIONS handler for preflight requests
+@app.options("/api/v1/matches/batch")
+async def preflight_handler():
+    return JSONResponse(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "https://mauric10.com",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Max-Age": "600"
+        }
+    )
+
 validator = SchemaValidator()
 
 
@@ -111,7 +147,7 @@ async def process_match_batch(request: MatchBatchRequest) -> MatchBatchResponse:
     for match_id in request.match_ids:
         try:
             # Get match data (which includes calculated odds)
-            match_data = await sports_db.get_match_data(match_id)
+            match_data, is_cached = await sports_db.get_match_data(match_id)
             
             # Validate data
             try:
@@ -124,19 +160,21 @@ async def process_match_batch(request: MatchBatchRequest) -> MatchBatchResponse:
                 })
                 continue
             
-            # Produce to Kafka with detailed logging
-            logger.info(f"Producing message to Kafka for match {match_id}")
-            logger.debug(f"Message content: {json.dumps(match_data, indent=2)}")
-            
-            try:
-                await kafka.produce_message(
-                    topic=settings.KAFKA_TOPIC,
-                    value=match_data
-                )
-                logger.info(f"Successfully produced message to Kafka for match {match_id}")
-            except Exception as e:
-                logger.error(f"Failed to produce message to Kafka for match {match_id}: {str(e)}")
-                raise
+            # Only produce to Kafka if we got fresh data (not from cache)
+            if not is_cached:
+                # Produce to Kafka with detailed logging
+                logger.info(f"Producing message to Kafka for match {match_id}")
+                logger.debug(f"Message content: {json.dumps(match_data, indent=2)}")
+                
+                try:
+                    await kafka.produce_message(
+                        topic=settings.KAFKA_TOPIC,
+                        value=match_data
+                    )
+                    logger.info(f"Successfully produced message to Kafka for match {match_id}")
+                except Exception as e:
+                    logger.error(f"Failed to produce message to Kafka for match {match_id}: {str(e)}")
+                    raise
             
             processed += 1
             results.append(match_data)
